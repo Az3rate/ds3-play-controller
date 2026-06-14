@@ -2,35 +2,41 @@
 "use strict";
 // DS3 Guide Numpad Controller
 // ---------------------------------------------------------------------------
-// A tiny local helper that lets you drive the Dark Souls III 100% walkthrough
+// A small local helper that lets you drive the Dark Souls III 100% walkthrough
 // (https://ds3-community-guide.vercel.app) from your numpad while the game has
-// focus. It relays two abstract actions to the guide page open in your browser:
+// focus, and contribute a screenshot from the same keypad.
 //
-//     numpad 8  ->  "nav-up"     (step to the previous walkthrough step)
-//     numpad 2  ->  "nav-down"   (step to the next walkthrough step)
+//   Play:     8 step up   2 step down   5 tick step   4/6 prev/next chapter
+//             9 capture a Steam screenshot and submit it to the highlighted step
+//             0 toggle screenshot-edit mode
+//   Edit:     4/6 pick one of the step's screenshots   9 replace it   7 remove it   0 exit
 //
-// What it is NOT: it does not read, log, store, or transmit your keystrokes.
-// It watches for exactly two numpad keys, and when one is pressed it sends the
-// WORD for that action (e.g. "nav-down") to your own machine at 127.0.0.1.
-// Nothing leaves your computer except that one local message; your browser tab,
-// which you opened yourself, picks it up and scrolls the guide.
+// What it does NOT do: it does not read, log, store, or transmit your keystrokes.
+// It watches a fixed set of numpad keys, and on a press it sends the WORD for that
+// action (e.g. "nav-down") to your own machine at 127.0.0.1. For a capture it copies
+// the screenshot YOU took with Steam (F12) into a local folder and serves those bytes
+// to your own browser tab, which uploads it under your account. Nothing else leaves
+// your computer.
 //
-// Two endpoints, that is the whole server:
-//     GET  /api/events  -> a Server-Sent Events stream the guide subscribes to
-//     POST /api/key     -> { action } ; relayed to every connected guide tab
+//   GET  /api/events     -> Server-Sent Events stream the guide subscribes to
+//   POST /api/key        -> { action, file? } ; relayed to every connected guide tab
+//   GET  /shot/<file>    -> the JPEG you just captured, for your own tab to upload
+//   POST /api/discard    -> { file } ; delete a captured file after it is uploaded
 //
 // Run:  node controller.js [port]            (default 10030)
 //       NO_LISTENER=1 node controller.js     (relay only; do not watch the numpad)
 const http = require("http");
-const { spawn } = require("child_process");
+const fs = require("fs");
 const path = require("path");
+const { spawn } = require("child_process");
 
 const PORT = parseInt(process.argv[2], 10) || 10030;
+const QUEUE_DIR = path.join(__dirname, ".queue");   // captured Steam screenshots land here
+fs.mkdirSync(QUEUE_DIR, { recursive: true });
 
-// Only these page origins may receive events. The published guide, plus the
+// Only these page origins may talk to the controller. The published guide, plus the
 // local preview harness used while developing it. The server is also bound to
-// 127.0.0.1 below, so the network cannot reach it at all; this list is the
-// second lock, deciding WHICH website's tab is allowed to listen.
+// 127.0.0.1 below, so the network cannot reach it; this list is the second lock.
 const ALLOWED = [
   "https://ds3-community-guide.vercel.app",
   "http://localhost:10040",
@@ -45,6 +51,13 @@ function cors(origin) {
     "Access-Control-Allow-Private-Network": "true",   // answer Chrome's private-network preflight
     "Vary": "Origin",
   };
+}
+
+// Only ever touch a plain image filename inside the queue (no path traversal).
+function safeQueuePath(name) {
+  const base = path.basename(String(name || ""));
+  if (!/^[A-Za-z0-9._-]+\.(jpe?g|png)$/i.test(base)) return null;
+  return path.join(QUEUE_DIR, base);
 }
 
 const clients = new Set();
@@ -80,9 +93,27 @@ const server = http.createServer(async (req, res) => {
 
   if (url.pathname === "/api/key" && req.method === "POST") {
     const b = await readBody(req);
-    if (b && b.action) { broadcast(b); console.log("  key ->", b.action); }
+    if (b && b.action) { broadcast(b); console.log("  key ->", b.action + (b.file ? ` (${b.file})` : "")); }
     res.writeHead(200, { ...cors(origin), "Content-Type": "application/json" });
     return res.end(JSON.stringify({ ok: true, clients: clients.size }));
+  }
+
+  // Serve a captured screenshot to your own tab so it can resize + upload it.
+  if (url.pathname.startsWith("/shot/") && req.method === "GET") {
+    const p = safeQueuePath(decodeURIComponent(url.pathname.slice("/shot/".length)));
+    if (!p || !fs.existsSync(p)) { res.writeHead(404, cors(origin)); return res.end("no such shot"); }
+    const ct = /\.png$/i.test(p) ? "image/png" : "image/jpeg";
+    res.writeHead(200, { ...cors(origin), "Content-Type": ct, "Cache-Control": "no-store" });
+    return fs.createReadStream(p).pipe(res);
+  }
+
+  // Drop a captured file once the tab has uploaded it.
+  if (url.pathname === "/api/discard" && req.method === "POST") {
+    const b = await readBody(req);
+    const p = safeQueuePath(b.file);
+    if (p) { try { fs.unlinkSync(p); } catch {} }
+    res.writeHead(200, { ...cors(origin), "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ ok: true }));
   }
 
   res.writeHead(404, cors(origin)); res.end("not found");
@@ -91,17 +122,18 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`\n  DS3 Guide Numpad Controller -> http://127.0.0.1:${PORT}`);
   console.log(`  Allowed pages: ${ALLOWED.join(" , ")}`);
-  console.log(`  Open the guide, enable the controller, then press numpad 8 / 2 to step up / down.`);
+  console.log(`  Captures go to: ${QUEUE_DIR}`);
+  console.log(`  Enable the controller on the guide's Controller page, then use the numpad.`);
   console.log(`  Ctrl+C to stop.\n`);
   startListener();
 });
 
 function startListener() {
   if (process.env.NO_LISTENER) return console.log("  (numpad listener disabled via NO_LISTENER)");
-  if (process.platform !== "win32") return console.log("  (numpad listener is Windows-only; POST {action:'nav-up'|'nav-down'} to /api/key to simulate)");
+  if (process.platform !== "win32") return console.log("  (numpad listener is Windows-only; POST {action} to /api/key to simulate)");
   const ps = path.join(__dirname, "numpad.ps1");
   const child = spawn("powershell.exe",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps, "-ServerUrl", `http://127.0.0.1:${PORT}`],
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps, "-ServerUrl", `http://127.0.0.1:${PORT}`, "-QueueDir", QUEUE_DIR],
     { stdio: ["ignore", "inherit", "inherit"] });
   child.on("error", e => console.log("  listener failed:", e.message));
   const kill = () => { try { child.kill(); } catch {} };
