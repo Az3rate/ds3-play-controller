@@ -104,19 +104,28 @@ Three small parts, all open:
 - **Public and small.** Two short files plus a server. Any developer can read the
   whole thing in a few minutes.
 
+## Requirements
+
+- Windows, with [Node.js](https://nodejs.org) installed.
+- Dark Souls III on Steam.
+- **The Steam overlay must be enabled for Dark Souls III, and F12 must be the Steam
+  screenshot key** (the default). The Steam overlay is the only thing that can grab
+  an exclusive-fullscreen frame, so screenshot capture will not work without it.
+- A guide account: sign in on the site to contribute screenshots.
+
 ## Install and run (Windows)
 
 1. Install [Node.js](https://nodejs.org) once.
-2. Download this repo (green **Code** button -> **Download ZIP**, or `git clone`).
-3. In a terminal in this folder:
-
-   ```
-   node controller.js
-   ```
-
-4. Open the guide in Chrome or Edge, turn the controller on from the guide's
-   controller page, and click **Allow** on the browser's device-access prompt.
-5. Press numpad **8** / **2** to step up / down. Stop any time with `Ctrl+C`.
+2. In Steam, open **Settings -> In Game**: enable the **Steam overlay** and keep the
+   screenshot shortcut on **F12**. Make sure the overlay is also enabled for Dark
+   Souls III (right-click the game -> **Properties**).
+3. Download this repo (green **Code** button -> **Download ZIP**, or `git clone`).
+4. In a terminal in this folder, run `node controller.js`.
+5. Open the guide in Chrome or Edge, **sign in**, turn the controller on from the
+   Controller page, and click **Allow** on the browser's device-access prompt.
+6. In-game, take **one F12 screenshot once** so the controller can find your Steam
+   screenshots folder. After that, numpad **9** captures and submits, **8 / 2** step,
+   and so on. Stop any time with `Ctrl+C`.
 
 ## Stop using it
 
