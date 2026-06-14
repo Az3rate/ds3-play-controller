@@ -10,10 +10,11 @@
 # exclusive-fullscreen frame), copies the resulting JPG into the queue, and tells the
 # guide to upload it. Your keystrokes are never recorded.
 param(
-  [string]$ServerUrl = "http://127.0.0.1:10030",
-  [string]$QueueDir  = "$PSScriptRoot\.queue",
-  [string]$AppId     = "374320",   # Dark Souls III Steam app id
-  [int]$ScreenshotVk = 0x7B        # F12 = default Steam screenshot key
+  [string]$ServerUrl   = "http://127.0.0.1:10030",
+  [string]$QueueDir    = "$PSScriptRoot\.queue",
+  [string]$AppId       = "374320",      # Dark Souls III Steam app id
+  [int]$ScreenshotVk   = 0x7B,          # F12 = default Steam screenshot key
+  [string]$GamePattern = "DarkSouls"    # only send F12 when this process is focused
 )
 
 New-Item -ItemType Directory -Force -Path $QueueDir | Out-Null
@@ -30,8 +31,20 @@ public class K {
   [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int v);
   [DllImport("user32.dll")] public static extern short GetKeyState(int v);
   [DllImport("user32.dll")] public static extern void keybd_event(byte v, byte s, uint f, UIntPtr e);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
 }
 '@
+
+# Name of the process that currently owns the foreground window, so we only ever
+# send F12 into the game. Otherwise F12 would hit whatever app is focused (e.g. the
+# browser, where it opens DevTools).
+function Get-ForegroundProcess {
+  $h = [K]::GetForegroundWindow()
+  $procId = 0
+  [K]::GetWindowThreadProcessId($h, [ref]$procId) | Out-Null
+  try { return (Get-Process -Id $procId -ErrorAction Stop).ProcessName } catch { return "" }
+}
 
 # ----- Steam screenshot capture (works for exclusive fullscreen via the overlay) -----
 function Get-SteamShotDirs {
@@ -113,9 +126,14 @@ while ($true) {
     if ($pressed -and -not $down[$vk]) {
       $down[$vk] = $true
       if ($vk -eq $CAPTURE_KEY) {
-        if (-not $ShotDirs -or $ShotDirs.Count -eq 0) { $ShotDirs = Get-SteamShotDirs }   # retry detect
-        $name = Capture-Steam $QueueDir $ShotDirs
-        if ($name) { Post @{ action = "capture"; file = $name }; Write-Host "  capture -> $name" }
+        $fg = Get-ForegroundProcess
+        if ($fg -notmatch $GamePattern) {
+          Write-Host "  capture skipped: $GamePattern is not focused (foreground: '$fg'). Numpad 9 only captures in-game."
+        } else {
+          if (-not $ShotDirs -or $ShotDirs.Count -eq 0) { $ShotDirs = Get-SteamShotDirs }   # retry detect
+          $name = Capture-Steam $QueueDir $ShotDirs
+          if ($name) { Post @{ action = "capture"; file = $name }; Write-Host "  capture -> $name" }
+        }
       } else {
         Post @{ action = $MAP[$vk] }
         Write-Host "  $($MAP[$vk])"

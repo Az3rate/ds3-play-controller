@@ -41,6 +41,8 @@ const ALLOWED = [
   "https://ds3-community-guide.vercel.app",
   "http://localhost:10040",
   "http://127.0.0.1:10040",
+  "http://localhost:10050",
+  "http://127.0.0.1:10050",
 ];
 function cors(origin) {
   const ok = ALLOWED.includes(origin);
